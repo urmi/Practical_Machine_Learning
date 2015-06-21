@@ -1,0 +1,163 @@
+---
+title: "Practical Machine Learning Course Project"
+output: html_document
+---
+
+## Synopsis: 
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+## Data:
+The data is taken from the [Human Activity Recognition](http://groupware.les.inf.puc-rio.br/har) programme at [Groupware](http://groupware.les.inf.puc-rio.br/).
+
+
+The goal of this project is to predict the manner of performing unilateral dumbbell biceps curls based on data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The 5 possible methods include -
+
+* A: exactly according to the specification 
+* B: throwing the elbows to the front
+* C: lifting the dumbbell only halfway 
+* D: lowering the dumbbell only halfway
+* E: throwing the hips to the front
+
+#### Loading libraries, and set the seed for reproduceability
+```{r Load, message=FALSE}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+set.seed(1234)
+```
+
+#### Download the Data
+```{r download}
+setwd("D:/Coursera/Practical_Machine_Learning")
+training.file <- '.\\data\\pml-training.csv'
+testing.file     <- '.\\data\\pml-testing.csv'
+training.url  <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+testing.url      <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+# download.file(training.url, training.file)
+# download.file(testing.url, testing.file)
+```
+
+#### Load the data sets and perform preliminary cleaning
+
+# Load the training and testing data set and replace all missing with "NA"
+```{r load}
+read.pml        <- function(x) { read.csv(x, na.strings = c("", "NA", "#DIV/0!") ) }
+trainset        <- read.pml(training.file)
+testset         <- read.pml(testing.file) 
+
+# Check dimensions for number of variables and number of observations
+dim(trainset)
+dim(testset)
+
+# Delete columns with all missing values
+trainset<-trainset[,colSums(is.na(trainset)) == 0]
+testset <-testset[,colSums(is.na(testset)) == 0]
+
+# Some variables are irrelevant to our current project: user_name, raw_timestamp_part_1, raw_timestamp_part_,2 cvtd_timestamp, new_window, and  num_window (columns 1 to 7). We can delete these variables.
+trainset <-trainset[,-c(1:7)]
+testset <-testset[,-c(1:7)]
+
+# Check the new dataset
+dim(trainset)
+dim(testset)
+```
+
+#### Partitioning the training data set to allow cross-validation. 
+
+Split the full training data into smaller training set and a validation set
+```{r plot}
+trainF <- createDataPartition(y=trainset$classe, p=0.7, list=F)
+trainT <- trainset[trainF, ]
+trainV <- trainset[-trainF, ]
+dim(trainT)
+dim(trainV)
+
+# A plot of the outcome variable will allow us to see the frequency of each levels of classe in the trainT data set and compare one another.
+
+plot(trainT$classe, col="light green", main="Bar Plot of levels of the variable classe within the trainT data set", xlab="classe levels", ylab="Frequency")
+```
+
+Level A is the most frequent occurrences while level D is the least frequent occurrences.
+
+First prediction model: Using Decision Tree
+
+```{r prediction1}
+model1 <- train(classe~.,method="rpart", data=trainT)
+
+print(model1$finalModel)
+
+fancyRpartPlot(model1$finalModel,cex=.5,under.cex=1,shadow.offset=0)
+
+# Predicting:
+classPrediction1 <- predict(model1, trainV)
+
+# Test results on our trainV data set:
+confusionMatrix(classPrediction1, trainV$classe)
+```
+
+When run against the corresponding testing set, the accuracy rate was very low (48.9%).The model is the least accurate for outcome D.
+
+Second prediction model: Using Random Forest
+
+```{r prediction2}
+model2 <- randomForest(classe ~. , data=trainT, method="class")
+
+# Predicting:
+classPrediction2 <- predict(model2, trainV, type = "class")
+
+# show confusion matrix to get estimate of out-of-sample error
+confusionMatrix(classPrediction2, trainV$classe)
+```
+
+The accuracy is 99.7%, thus my predicted accuracy for the out-of-sample error is 0.3%. This is an excellent result, so I will use Random Forests to predict on the test set.
+
+#### Re-training the Selected Model
+
+It is important to train the model on the full training set, before predicting on the test set, in order to produce the most accurate predictions. Therefore, repeat everything on trainset and testset.
+
+## re-fit model using full training set (trainset)
+
+```{r testpredictions}
+trainingControl <- trainControl(method="cv", number=3, verboseIter=F)
+modelFit <- train(classe ~ ., data=trainset, method="rf", trControl=trainingControl)
+
+# Making Test Set Predictions
+
+# Now, use the model fit on trainset to predict the label for the observations in testset, and write those predictions to individual files:
+
+# predict on test set
+testprediction <- predict(modelFit, newdata=testset)
+
+# convert predictions to character vector
+testprediction <- as.character(testprediction)
+print(testprediction)
+```
+
+## Decision
+
+Random Forest was a superior model for prediction of exercise quality compared to rpart. The nominal categories were dependent on various variables and the interaction between them. Accuracy for Random Forest model was 0.997 (95% CI: (0.995, 0.9981)) compared to 0.489 (95% CI: (0.4762, 0.5019)) for Decision Tree model. The random Forest model is chosen with the accuracy of the model of 0.997. The expected out-of-sample error is estimated at 0.003, or 0.3%. The Test data set comprises 20 cases. With an accuracy above 99% on our cross-validation data, we can expect that very few, or none, of the test samples will be missclassified.
+
+## Submission
+
+```{r, eval=FALSE}
+# Utility function provided by the instructor
+pml_write_files <- function(x) {
+    n <- length(x)
+    for(i in 1:n) {
+        filename <- paste0("problem_id_", i, ".txt")
+        write.table(x[i], file=filename, quote=F, row.names=F, col.names=F)
+    }
+}
+
+# create prediction files to submit
+pml_write_files(testprediction)
+```
+
+References
+
+[1] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+[2] Krzysztof Gra??bczewski and Norbert Jankowski. Feature Selection with Decision Tree Criterion.
